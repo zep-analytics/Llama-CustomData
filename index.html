@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Q&A</title>
+</head>
+<body>
+    <h1>Document Q&A</h1>
+    
+    {% if error %}
+        <p style="color: red;">{{ error }}</p>
+    {% endif %}
+
+    {% if success %}
+        <p style="color: green;">{{ success }}</p>
+        {% if chain %}
+            <form action="/ask" method="post">
+                <label for="question">Ask a question:</label>
+                <input type="text" id="question" name="question" required>
+                <button type="submit">Ask</button>
+            </form>
+        {% endif %}
+    {% endif %}
+
+    {% if question %}
+        <p><strong>Question:</strong> {{ question }}</p>
+    {% endif %}
+
+    {% if answer %}
+        <p><strong>Answer:</strong> {{ answer }}</p>
+    {% endif %}
+
+    <form action="/upload" method="post" enctype="multipart/form-data">
+        <label for="file">Upload a PDF document:</label>
+        <input type="file" id="file" name="file" accept=".pdf" required>
+        <button type="submit">Upload</button>
+    </form>
+</body>
+</html>
