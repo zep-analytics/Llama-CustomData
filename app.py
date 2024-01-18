@@ -1,17 +1,50 @@
 from flask import Flask, render_template, request
-from main import create_vector_db, get_answer_chain
+from langchain import PromptTemplate
+from langchain.chains import RetrievalQA
+from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.document_loaders import PyPDFLoader, DirectoryLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.llms import CTransformers
 
 app = Flask(__name__)
 
-# Provide the correct path to your PDF document
-UPLOAD_FOLDER = 'data'
-ALLOWED_EXTENSIONS = {'pdf'}
+# Load PDF documents from the 'data/' directory
+loader = DirectoryLoader('data1/', glob="*.pdf", loader_cls=PyPDFLoader)
+documents = loader.load()
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# Split text into chunks
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+text_chunks = text_splitter.split_documents(documents)
 
+# Load embedding model and create a FAISS vector store
+embeddings = HuggingFaceEmbeddings(model_name='sentence-transformers/all-MiniLM-L6-v2', model_kwargs={'device': 'cpu'})
+vector_store = FAISS.from_documents(text_chunks, embeddings)
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+# Load LLM model for question answering
+llm = CTransformers(model="models\llama-2-7b-chat.ggmlv3.q8_0.bin",
+                    model_type="llama",
+                    config={'max_new_tokens': 128, 'temperature': 0.01})
+
+# Define the prompt template for question answering
+template = """Use the following pieces of information to answer the user's question.
+If you don't know the answer, just say you don't know; don't try to make up an answer.
+
+Context:{context}
+Question:{question}
+
+Only return the helpful answer below and nothing else
+Helpful answer
+"""
+
+qa_prompt = PromptTemplate(template=template, input_variables=['context', 'question'])
+
+# Create a RetrievalQA chain
+chain = RetrievalQA.from_chain_type(llm=llm,
+                                   chain_type='stuff',
+                                   retriever=vector_store.as_retriever(search_kwargs={'k': 2}),
+                                   return_source_documents=True,
+                                   chain_type_kwargs={'prompt': qa_prompt})
 
 
 @app.route('/')
@@ -29,28 +62,18 @@ def upload():
     if file.filename == '':
         return render_template('index.html', error='No selected file')
 
-    if file and allowed_file(file.filename):
-        file_path = f"{app.config['UPLOAD_FOLDER']}/{file.filename}"
-        file.save(file_path)
+    # Save the uploaded PDF file
+    file.save('uploaded_file.pdf')
 
-        create_vector_db(file_path)
-        chain = get_answer_chain()
-
-        return render_template('index.html', success='File uploaded successfully!', chain=chain)
-
-    return render_template('index.html', error='Invalid file format')
+    return render_template('index.html', success='File uploaded successfully')
 
 
 @app.route('/ask', methods=['POST'])
 def ask_question():
     question = request.form.get('question')
-
-    if not question:
-        return render_template('index.html', error='Please enter a question')
-
-    chain = get_answer_chain()
-    answer = chain(question)
-    return render_template('index.html', question=question, answer=answer)
+    result = chain({'query': question})
+    answer = result['result']
+    return render_template('index.html', answer=answer)
 
 
 if __name__ == '__main__':
